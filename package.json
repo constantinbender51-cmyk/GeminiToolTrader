@@ -1,0 +1,18 @@
+{
+  "name": "gemini-kraken-trading-bot",
+  "version": "1.0.0",
+  "description": "A Node.js trading bot using Gemini's AI for strategy and Kraken for execution.",
+  "main": "gemini-kraken-trader.js",
+  "type": "module",
+  "scripts": {
+    "start": "node gemini-kraken-trader.js"
+  },
+  "author": "Manus",
+  "license": "ISC",
+  "dependencies": {
+    "@google/generative-ai": "^0.14.1",
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5",
+    "qs": "^6.12.3"
+  }
+}
