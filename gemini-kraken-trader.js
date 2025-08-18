@@ -6,7 +6,7 @@ import 'dotenv/config';
 const KRAKEN_API_KEY = process.env.KRAKEN_API_KEY;
 const KRAKEN_API_SECRET = process.env.KRAKEN_API_SECRET;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const REQUEST_DELAY_MS = 1500; // **NEW**: Delay of 1.5 seconds between loop iterations to prevent rate limiting.
+const REQUEST_DELAY_MS = 1500; // Delay between recursive calls to prevent rate limiting.
 
 if (!KRAKEN_API_KEY || !KRAKEN_API_SECRET || !GEMINI_API_KEY) {
     console.error("Error: Missing required environment variables (KRAKEN_API_KEY, KRAKEN_API_SECRET, GEMINI_API_KEY).");
@@ -87,9 +87,10 @@ const registry = {
     })
 };
 
-// --- Main Execution Logic ---
-(async () => {
+// --- Main Execution Logic (Recursive Function) ---
+async function runConversation() {
     console.log("Starting Gemini Trading Bot...");
+    const chat = model.startChat({ tools: [{ functionDeclarations: tools }] });
 
     const prompt = `
         You are an autonomous trading AI. Your goal is to grow the account balance by executing a trading strategy.
@@ -102,29 +103,28 @@ const registry = {
         7.  Conclude by holding for 10 seconds and then provide a final summary of your actions.
     `;
 
-    const chat = model.startChat({ tools: [{ functionDeclarations: tools }] });
-    let result = await chat.sendMessage(prompt);
-    let loopCount = 0;
-
-    while (true) {
-        loopCount++;
-        console.log(`\n--- Loop Iteration: ${loopCount} ---`);
+    let initialResult = await chat.sendMessage(prompt);
+    
+    // **NEW**: Recursive function to handle the conversation flow.
+    async function handleResponse(result, iteration = 1) {
+        console.log(`\n--- Conversation Turn: ${iteration} ---`);
 
         const calls = result.response.functionCalls();
+        
+        // **Exit Condition**: If there are no more function calls, print the final text and stop.
         if (!calls || calls.length === 0) {
-            console.log("Loop Exit Condition: No function calls returned by Gemini.");
-            console.log("--- Inspecting Final Response Object ---");
+            console.log("--- Conversation End: No more function calls from Gemini. ---");
+            console.log("Inspecting Final Response Object:");
             console.log(JSON.stringify(result.response, null, 2));
-            console.log("---------------------------------------");
-
+            
             const finalText = result.response.text();
             if (finalText) {
-                console.log("Gemini's final response:");
+                console.log("\nGemini's Final Summary:");
                 console.log(finalText);
             } else {
-                console.log("Gemini's final response was empty.");
+                console.log("\nGemini's final response was empty.");
             }
-            break;
+            return; // End recursion
         }
 
         console.log(`Gemini wants to call ${calls.length} function(s):`);
@@ -136,30 +136,31 @@ const registry = {
                 console.log(`Executing: ${toolName}(${JSON.stringify(call.args)})`);
                 try {
                     const apiResult = await registry[toolName](call.args);
-                    toolResponses.push({
-                        functionName: toolName,
-                        response: { result: apiResult }
-                    });
+                    toolResponses.push({ functionName: toolName, response: { result: apiResult } });
                 } catch (error) {
                     console.error(`Error executing tool '${toolName}':`, error.message);
-                    toolResponses.push({
-                        functionName: toolName,
-                        response: { error: `Execution failed: ${error.message}` }
-                    });
+                    toolResponses.push({ functionName: toolName, response: { error: `Execution failed: ${error.message}` } });
                 }
             } else {
                 console.warn(`Warning: Unknown tool '${toolName}' requested by Gemini.`);
             }
         }
 
+        // Add a delay before sending the response back to Gemini
+        console.log(`\nWaiting for ${REQUEST_DELAY_MS}ms before sending results...`);
+        await delay(REQUEST_DELAY_MS);
+
         console.log("\n--- Sending Tool Responses to Gemini ---");
         console.log(JSON.stringify(toolResponses, null, 2));
-        console.log("--------------------------------------");
-
-        result = await chat.sendMessage(JSON.stringify(toolResponses));
         
-        // **NEW**: Added a delay to prevent overstepping rate limits.
-        console.log(`\nWaiting for ${REQUEST_DELAY_MS}ms before next iteration...`);
-        await delay(REQUEST_DELAY_MS);
+        // Send results back to Gemini and recurse
+        const nextResult = await chat.sendMessage(JSON.stringify(toolResponses));
+        await handleResponse(nextResult, iteration + 1);
     }
-})();
+
+    // Start the recursive conversation handler
+    await handleResponse(initialResult);
+}
+
+// Run the main function
+runConversation().catch(console.error);
