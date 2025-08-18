@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI, Schema } from '@google/generative-ai';
+import { GoogleGenerativeAI, Schema } from '@google/generative-ai'; // Changed here
 import KrakenFuturesApi from './krakenApi.js'; // Assuming krakenApi.js is in the same directory
 import 'dotenv/config';
 
@@ -23,10 +23,10 @@ const tools = [
         name: 'getHistoricPriceData',
         description: 'Fetches historical OHLC (Open, High, Low, Close) price data for a given trading pair.',
         parameters: {
-            type: SchemaType.OBJECT,
+            type: Schema.OBJECT, // Changed here
             properties: {
-                pair: { type: SchemaType.STRING, description: "The trading pair, e.g., 'PI_XBTUSD'." },
-                interval: { type: SchemaType.NUMBER, description: 'The time frame interval in minutes (e.g., 60 for 1 hour).' }
+                pair: { type: Schema.STRING, description: "The trading pair, e.g., 'PI_XBTUSD'." }, // Changed here
+                interval: { type: Schema.NUMBER, description: 'The time frame interval in minutes (e.g., 60 for 1 hour).' } // Changed here
             },
             required: ['pair', 'interval']
         }
@@ -34,25 +34,25 @@ const tools = [
     {
         name: 'getAvailableMargin',
         description: 'Retrieves the total available margin and balance information from the trading account.',
-        parameters: { type: SchemaType.OBJECT, properties: {}, required: [] }
+        parameters: { type: Schema.OBJECT, properties: {}, required: [] } // Changed here
     },
     {
         name: 'getOpenPositions',
         description: 'Fetches all currently open positions in the trading account.',
-        parameters: { type: SchemaType.OBJECT, properties: {}, required: [] }
+        parameters: { type: Schema.OBJECT, properties: {}, required: [] } // Changed here
     },
     {
         name: 'getOpenOrders',
         description: 'Retrieves a list of all currently open (unfilled) orders.',
-        parameters: { type: SchemaType.OBJECT, properties: {}, required: [] }
+        parameters: { type: Schema.OBJECT, properties: {}, required: [] } // Changed here
     },
     {
         name: 'cancelOrder',
         description: 'Cancels a specific open order using its order ID.',
         parameters: {
-            type: SchemaType.OBJECT,
+            type: Schema.OBJECT, // Changed here
             properties: {
-                order_id: { type: SchemaType.STRING, description: 'The unique identifier of the order to cancel.' }
+                order_id: { type: Schema.STRING, description: 'The unique identifier of the order to cancel.' } // Changed here
             },
             required: ['order_id']
         }
@@ -61,9 +61,9 @@ const tools = [
         name: 'hold',
         description: 'Pauses execution for a specified number of seconds to wait for market conditions to change.',
         parameters: {
-            type: SchemaType.OBJECT,
+            type: Schema.OBJECT, // Changed here
             properties: {
-                duration: { type: SchemaType.NUMBER, description: 'The duration to wait, in seconds.' }
+                duration: { type: Schema.NUMBER, description: 'The duration to wait, in seconds.' } // Changed here
             },
             required: ['duration']
         }
