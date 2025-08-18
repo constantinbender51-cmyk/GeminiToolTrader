@@ -1,5 +1,5 @@
-import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai'; // Reverted
-import KrakenFuturesApi from './krakenApi.js'; // Assuming krakenApi.js is in the same directory
+import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
+import KrakenFuturesApi from './krakenApi.js';
 import 'dotenv/config';
 
 // --- Configuration ---
@@ -23,10 +23,10 @@ const tools = [
         name: 'getHistoricPriceData',
         description: 'Fetches historical OHLC (Open, High, Low, Close) price data for a given trading pair.',
         parameters: {
-            type: SchemaType.OBJECT, // Reverted
+            type: SchemaType.OBJECT,
             properties: {
-                pair: { type: SchemaType.STRING, description: "The trading pair, e.g., 'PI_XBTUSD'." }, // Reverted
-                interval: { type: SchemaType.NUMBER, description: 'The time frame interval in minutes (e.g., 60 for 1 hour).' } // Reverted
+                pair: { type: SchemaType.STRING, description: "The trading pair, e.g., 'PI_XBTUSD'." },
+                interval: { type: SchemaType.NUMBER, description: 'The time frame interval in minutes (e.g., 60 for 1 hour).' }
             },
             required: ['pair', 'interval']
         }
@@ -34,25 +34,25 @@ const tools = [
     {
         name: 'getAvailableMargin',
         description: 'Retrieves the total available margin and balance information from the trading account.',
-        parameters: { type: SchemaType.OBJECT, properties: {}, required: [] } // Reverted
+        parameters: { type: SchemaType.OBJECT, properties: {}, required: [] }
     },
     {
         name: 'getOpenPositions',
         description: 'Fetches all currently open positions in the trading account.',
-        parameters: { type: SchemaType.OBJECT, properties: {}, required: [] } // Reverted
+        parameters: { type: SchemaType.OBJECT, properties: {}, required: [] }
     },
     {
         name: 'getOpenOrders',
         description: 'Retrieves a list of all currently open (unfilled) orders.',
-        parameters: { type: SchemaType.OBJECT, properties: {}, required: [] } // Reverted
+        parameters: { type: SchemaType.OBJECT, properties: {}, required: [] }
     },
     {
         name: 'cancelOrder',
         description: 'Cancels a specific open order using its order ID.',
         parameters: {
-            type: SchemaType.OBJECT, // Reverted
+            type: SchemaType.OBJECT,
             properties: {
-                order_id: { type: SchemaType.STRING, description: 'The unique identifier of the order to cancel.' } // Reverted
+                order_id: { type: SchemaType.STRING, description: 'The unique identifier of the order to cancel.' }
             },
             required: ['order_id']
         }
@@ -61,9 +61,9 @@ const tools = [
         name: 'hold',
         description: 'Pauses execution for a specified number of seconds to wait for market conditions to change.',
         parameters: {
-            type: SchemaType.OBJECT, // Reverted
+            type: SchemaType.OBJECT,
             properties: {
-                duration: { type: SchemaType.NUMBER, description: 'The duration to wait, in seconds.' } // Reverted
+                duration: { type: SchemaType.NUMBER, description: 'The duration to wait, in seconds.' }
             },
             required: ['duration']
         }
@@ -95,21 +95,36 @@ const registry = {
         4.  For now, your primary task is to analyze and report. Do not place an order yet.
         5.  Explain your reasoning and the data you've gathered.
         6.  If there are any open orders you deem unnecessary, cancel one of them.
-        7.  Conclude by holding for 10 seconds.
+        7.  Conclude by holding for 10 seconds and then provide a final summary of your actions.
     `;
 
     const chat = model.startChat({ tools: [{ functionDeclarations: tools }] });
     let result = await chat.sendMessage(prompt);
+    let loopCount = 0;
 
     while (true) {
+        loopCount++;
+        console.log(`\n--- Loop Iteration: ${loopCount} ---`);
+
         const calls = result.response.functionCalls();
         if (!calls || calls.length === 0) {
-            console.log("Gemini's final response:");
-            console.log(result.response.text());
+            // **DEBUGGING STEP**: Log the reason for exiting the loop and the final response object.
+            console.log("Loop Exit Condition: No function calls returned by Gemini.");
+            console.log("--- Inspecting Final Response Object ---");
+            console.log(JSON.stringify(result.response, null, 2));
+            console.log("---------------------------------------");
+
+            const finalText = result.response.text();
+            if (finalText) {
+                console.log("Gemini's final response:");
+                console.log(finalText);
+            } else {
+                console.log("Gemini's final response was empty.");
+            }
             break;
         }
 
-        console.log(`\n--- Gemini wants to call ${calls.length} function(s) ---`);
+        console.log(`Gemini wants to call ${calls.length} function(s):`);
         const toolResponses = [];
 
         for (const call of calls) {
@@ -123,16 +138,22 @@ const registry = {
                         response: { result: apiResult }
                     });
                 } catch (error) {
-                    console.error(`Error executing ${toolName}:`, error);
+                    // **DEBUGGING STEP**: Enhanced error logging.
+                    console.error(`Error executing tool '${toolName}':`, error.message);
                     toolResponses.push({
                         functionName: toolName,
-                        response: { error: error.message }
+                        response: { error: `Execution failed: ${error.message}` }
                     });
                 }
             } else {
                 console.warn(`Warning: Unknown tool '${toolName}' requested by Gemini.`);
             }
         }
+
+        // **DEBUGGING STEP**: Log the data being sent back to Gemini.
+        console.log("\n--- Sending Tool Responses to Gemini ---");
+        console.log(JSON.stringify(toolResponses, null, 2));
+        console.log("--------------------------------------");
 
         // Send results back to Gemini
         result = await chat.sendMessage(JSON.stringify(toolResponses));
