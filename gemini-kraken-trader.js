@@ -6,11 +6,15 @@ import 'dotenv/config';
 const KRAKEN_API_KEY = process.env.KRAKEN_API_KEY;
 const KRAKEN_API_SECRET = process.env.KRAKEN_API_SECRET;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const REQUEST_DELAY_MS = 1500; // **NEW**: Delay of 1.5 seconds between loop iterations to prevent rate limiting.
 
 if (!KRAKEN_API_KEY || !KRAKEN_API_SECRET || !GEMINI_API_KEY) {
     console.error("Error: Missing required environment variables (KRAKEN_API_KEY, KRAKEN_API_SECRET, GEMINI_API_KEY).");
     process.exit(1);
 }
+
+// --- Utility function for delay ---
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // --- Initialize Clients ---
 const krakenClient = new KrakenFuturesApi(KRAKEN_API_KEY, KRAKEN_API_SECRET);
@@ -108,7 +112,6 @@ const registry = {
 
         const calls = result.response.functionCalls();
         if (!calls || calls.length === 0) {
-            // **DEBUGGING STEP**: Log the reason for exiting the loop and the final response object.
             console.log("Loop Exit Condition: No function calls returned by Gemini.");
             console.log("--- Inspecting Final Response Object ---");
             console.log(JSON.stringify(result.response, null, 2));
@@ -138,7 +141,6 @@ const registry = {
                         response: { result: apiResult }
                     });
                 } catch (error) {
-                    // **DEBUGGING STEP**: Enhanced error logging.
                     console.error(`Error executing tool '${toolName}':`, error.message);
                     toolResponses.push({
                         functionName: toolName,
@@ -150,12 +152,14 @@ const registry = {
             }
         }
 
-        // **DEBUGGING STEP**: Log the data being sent back to Gemini.
         console.log("\n--- Sending Tool Responses to Gemini ---");
         console.log(JSON.stringify(toolResponses, null, 2));
         console.log("--------------------------------------");
 
-        // Send results back to Gemini
         result = await chat.sendMessage(JSON.stringify(toolResponses));
+        
+        // **NEW**: Added a delay to prevent overstepping rate limits.
+        console.log(`\nWaiting for ${REQUEST_DELAY_MS}ms before next iteration...`);
+        await delay(REQUEST_DELAY_MS);
     }
 })();
