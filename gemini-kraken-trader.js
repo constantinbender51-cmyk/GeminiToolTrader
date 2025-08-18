@@ -6,11 +6,15 @@ import 'dotenv/config';
 const KRAKEN_API_KEY = process.env.KRAKEN_API_KEY;
 const KRAKEN_API_SECRET = process.env.KRAKEN_API_SECRET;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const CONVERSATION_TURN_DELAY_MS = 2000; // Delay between conversational turns.
 
 if (!KRAKEN_API_KEY || !KRAKEN_API_SECRET || !GEMINI_API_KEY) {
     console.error("Error: Missing required environment variables.");
     process.exit(1);
 }
+
+// --- Utility function for delay ---
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // --- Initialize Clients ---
 const krakenClient = new KrakenFuturesApi(KRAKEN_API_KEY, KRAKEN_API_SECRET);
@@ -49,13 +53,14 @@ const tools = [
         description: 'Pauses execution for a specified number of seconds.',
         parameters: { type: SchemaType.OBJECT, properties: { duration: { type: SchemaType.NUMBER } }, required: ['duration'] }
     },
+    // The explicit exit tool.
     {
-        name: 'provideAnalysis',
-        description: 'Call this function last to provide the final analysis based on the data from the other function calls.',
+        name: 'taskComplete',
+        description: 'Call this function when all analysis and actions are complete. Provide the final summary as an argument.',
         parameters: {
             type: SchemaType.OBJECT,
             properties: {
-                summary: { type: SchemaType.STRING, description: 'The final summary of the market and account status.' }
+                summary: { type: SchemaType.STRING, description: 'The final summary of all actions taken and the concluding analysis.' }
             },
             required: ['summary']
         }
@@ -73,63 +78,85 @@ const registry = {
         console.log(`Holding for ${params.duration} seconds...`);
         setTimeout(() => resolve(`Held for ${params.duration} seconds.`), params.duration * 1000);
     }),
-    provideAnalysis: (params) => {
-        console.log("\n--- Gemini's Final Analysis ---");
-        console.log(params.summary);
+    // The handler for our exit tool.
+    taskComplete: (params) => {
+        console.log("\n--- Gemini has signaled task completion ---");
+        console.log("Final Summary:\n", params.summary);
+        return "Execution successfully terminated.";
     }
 };
 
-// --- Main Execution Logic (Single Request, Multiple Function Calls) ---
-(async () => {
-    console.log("--- Starting Gemini Trading Bot (Non-Looping Architecture) ---");
+// --- Main Execution Logic (Recursive with Exit Condition) ---
+async function runConversation() {
+    console.log("Starting Gemini Trading Bot (Architecture with Defined Exit)...");
+    const chat = model.startChat({ tools: [{ functionDeclarations: tools }] });
 
-    // **CRUCIAL**: The prompt asks Gemini to plan all its function calls at once.
+    // The prompt instructs the AI on how to exit.
     const prompt = `
-        You are an autonomous trading analyst. Your task is to gather information about a trading account, analyze it, and provide a summary.
+        You are an autonomous trading AI. Your goal is to analyze the market and account, then provide a summary.
         
-        **Execution Plan:**
-        1. First, call \`getHistoricPriceData\` for the 'PI_XBTUSD' pair with a 60-minute interval.
-        2. Second, call \`getAvailableMargin\`.
-        3. Third, call \`getOpenPositions\`.
-        4. Finally, after planning the previous calls, call the \`provideAnalysis\` function with a concise summary of the market and account status.
+        **Your Task:**
+        1.  Fetch historical price data for 'PI_XBTUSD' on a 60-minute interval.
+        2.  Check the available margin.
+        3.  Check for any open positions or orders.
+        4.  Analyze all the gathered information.
+        5.  If there are any open orders you deem unnecessary, cancel one.
         
-        You must schedule all of these function calls in a single response.
+        **IMPORTANT:** Once you have completed all steps and have a final analysis, you MUST call the \`taskComplete\` function with your full summary. This is your final step. Do not reply with text.
     `;
 
-    try {
-        const chat = model.startChat({ tools: [{ functionDeclarations: tools }] });
-        
-        console.log("Sending a single request to Gemini to get the execution plan...");
-        const result = await chat.sendMessage(prompt);
+    let initialResult = await chat.sendMessage(prompt);
+    
+    async function handleResponse(result, iteration = 1) {
+        console.log(`\n--- Conversation Turn: ${iteration} ---`);
 
         const calls = result.response.functionCalls();
-
+        
         if (!calls || calls.length === 0) {
-            console.log("Gemini did not return any function calls. It may have responded with text instead:");
-            console.log(result.response.text());
+            console.log("--- Conversation End: AI provided a text response instead of calling a function. ---");
+            console.log("Final Text:", result.response.text() || "[No text provided]");
             return;
         }
 
-        console.log(`\nGemini returned a plan with ${calls.length} steps. Executing locally...`);
+        console.log(`Gemini wants to call ${calls.length} function(s):`);
+        
+        // This version processes one function call at a time to maintain a clear conversational flow.
+        const call = calls[0]; 
 
-        // This is a simple, finite loop over the results of a SINGLE API call.
-        for (const call of calls) {
-            console.log(`\nExecuting step: ${call.name}(${JSON.stringify(call.args)})`);
-            if (registry[call.name]) {
-                // We don't need the result of the functions for this pattern, just to execute them.
-                await registry[call.name](call.args);
-            } else {
-                console.warn(`Warning: Unknown tool '${call.name}' requested.`);
-            }
+        // Check for the exit condition first.
+        if (call.name === 'taskComplete') {
+            registry.taskComplete(call.args);
+            console.log("\n--- Script execution finished successfully. ---");
+            return; // Exit the entire recursive chain.
         }
 
-        console.log("\n--- Script execution finished successfully. ---");
+        if (registry[call.name]) {
+            console.log(`Executing: ${call.name}(${JSON.stringify(call.args)})`);
+            try {
+                const apiResult = await registry[call.name](call.args);
+                const toolResponse = { functionName: call.name, response: { result: apiResult } };
+                
+                console.log(`Waiting for ${CONVERSATION_TURN_DELAY_MS}ms...`);
+                await delay(CONVERSATION_TURN_DELAY_MS);
 
-    } catch (error) {
-        console.error("\n--- A critical error occurred ---");
-        console.error(error.message);
-        if (error.message.includes('429')) {
-             console.error("This indicates a rate limit issue, which is unexpected with this architecture. Please check your Google Cloud project's billing status and API quotas.");
+                console.log(`\n--- Sending Tool Response to Gemini for [${call.name}] ---`);
+                // Send the single tool response back and wait for the next instruction.
+                const nextResult = await chat.sendMessage(JSON.stringify([toolResponse]));
+                await handleResponse(nextResult, iteration + 1);
+
+            } catch (error) {
+                console.error(`Error during execution of ${call.name}:`, error.message);
+                return; // Stop on error.
+            }
+        } else {
+             console.warn(`Warning: Unknown tool '${call.name}' requested.`);
         }
     }
-})();
+
+    await handleResponse(initialResult);
+}
+
+runConversation().catch(error => {
+    console.error("\n--- A critical error occurred ---");
+    console.error(error.message);
+});
