@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai';
+import { GoogleGenerativeAI, Schema } from '@google/generative-ai';
 import KrakenFuturesApi from './krakenApi.js'; // Assuming krakenApi.js is in the same directory
 import 'dotenv/config';
 
